@@ -330,7 +330,9 @@ app.post('/api/chat', async (req, res) => {
       body: JSON.stringify({
         model:      'claude-sonnet-4-5',
         max_tokens: 4096,
-        system:     system,
+        // Prompt caching: kundali ka data har sawaal me same rehta hai.
+        // Cache se input ka sirf 10% lagta hai - seedhi bachat.
+        system: [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }],
         messages:   msgs
       })
     });

@@ -118,6 +118,84 @@ app.get('/', (req, res) => {
   });
 });
 
+/* ─── TEMP DIAGNOSTIC ───────────────────────────────────
+   Sirf variable ke NAAM aur LAMBAI dikhata hai - value kabhi nahi.
+   Dikkat theek hone ke baad ye pura block hata dena.
+──────────────────────────────────────────────────────── */
+app.get('/env-check', (req, res) => {
+  const want = ['ANTHROPIC_API_KEY','SUPABASE_URL','SUPABASE_SERVICE_KEY',
+                'RAZORPAY_SECRET','RAZORPAY_KEY_ID','STRIPE_SECRET_KEY','ADMIN_PASSWORD'];
+  const found = {};
+  want.forEach(k => {
+    const v = process.env[k];
+    found[k] = v ? ('set, ' + v.length + ' chars' + (v !== v.trim() ? '  <-- EXTRA SPACE!' : '')) : 'MISSING';
+  });
+  // Milte-julte naam jo Render me pade hain (galat spelling pakadne ke liye)
+  const similar = Object.keys(process.env).filter(k =>
+    /razor|stripe|supabase|admin|anthropic|claude/i.test(k) && want.indexOf(k) === -1);
+  res.json({ expected: found, other_matching_names: similar });
+});
+
+/* ══════════════════════════════════════════════
+   PRICING
+   Public read - website startup par yahi load karti hai.
+   Likhna sirf admin kar sakta hai.
+══════════════════════════════════════════════ */
+app.get('/api/pricing', async (req, res) => {
+  try {
+    const rows = await sb('settings?key=eq.pricing&select=value');
+    if (!rows || !rows.length) return res.status(404).json({ error: 'Pricing not set' });
+    res.json(rows[0].value);
+  } catch (err) {
+    res.status(500).json({ error: 'Could not load pricing' });
+  }
+});
+
+app.post('/api/admin/pricing', async (req, res) => {
+  if (!checkAdmin(req, res)) return;
+  try {
+    const incoming = req.body && req.body.pricing;
+
+    // Sirf padhna hai
+    if (!incoming) {
+      const rows = await sb('settings?key=eq.pricing&select=value');
+      return res.json({ pricing: (rows && rows[0]) ? rows[0].value : null });
+    }
+
+    // Save karne se pehle jaanch - ek galat number website ka
+    // pricing page tod sakta hai, isliye yahan rok lagayi hai.
+    const clean = {};
+    Object.keys(incoming).forEach(cur => {
+      const m = incoming[cur] || {};
+      const packs = (m.packs || [])
+        .map(p => ({
+          name: String(p.name || '').slice(0, 24),
+          q:    parseInt(p.q, 10),
+          base: Math.round(Number(p.base) * 100) / 100,
+          pop:  !!p.pop
+        }))
+        .filter(p => p.name && p.q > 0 && p.q <= 1000 && p.base > 0 && p.base <= 100000);
+      if (!packs.length) return;
+      clean[String(cur).toUpperCase().slice(0, 3)] = {
+        sym:   String(m.sym || '').slice(0, 3),
+        gst:   Math.min(Math.max(Number(m.gst) || 0, 0), 1),
+        pay:   (m.pay === 'razorpay') ? 'razorpay' : 'stripe',
+        packs: packs
+      };
+    });
+    if (!Object.keys(clean).length) return res.status(400).json({ error: 'No valid pricing to save' });
+
+    await sb('settings?key=eq.pricing', {
+      method: 'PATCH', prefer: 'return=minimal',
+      body: JSON.stringify({ value: clean, updated_at: new Date().toISOString() })
+    });
+    res.json({ ok: true, pricing: clean });
+  } catch (err) {
+    console.error('Pricing error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 /* ══════════════════════════════════════════════
    AUTH
 ══════════════════════════════════════════════ */

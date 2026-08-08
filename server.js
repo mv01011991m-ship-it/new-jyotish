@@ -10,6 +10,10 @@ const PORT = process.env.PORT || 3000;
 const SB_URL = process.env.SUPABASE_URL;
 const SB_KEY = process.env.SUPABASE_SERVICE_KEY;
 
+// Model env se badla ja sakta hai - Anthropic purane model retire karti
+// rehti hai, tab sirf Render me ye value badalni hogi, code nahi.
+const MODEL = process.env.CLAUDE_MODEL || 'claude-sonnet-4-5';
+
 // CORS
 app.use(cors());
 app.options('*', cors());
@@ -328,17 +332,24 @@ app.post('/api/chat', async (req, res) => {
         'anthropic-version': '2023-06-01'
       },
       body: JSON.stringify({
-        model:      'claude-sonnet-4-5',
+        model:      MODEL,
         max_tokens: 4096,
         // Prompt caching: kundali ka data har sawaal me same rehta hai.
-        // Cache se input ka sirf 10% lagta hai - seedhi bachat.
-        system: [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }],
-        messages:   msgs
+        // Cache se input ka sirf 10% lagta hai. Chhote prompt cache
+        // nahi hote, isliye lambe hone par hi cache_control lagate hain.
+        system: (String(system).length > 5000)
+          ? [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }]
+          : system,
+        messages: msgs
       })
     });
     const data = await response.json();
 
     if (!response.ok) {
+      // ASLI WAJAH sirf server logs me. Customer ko saaf message jaata hai.
+      console.error('ANTHROPIC ERROR', response.status, JSON.stringify(data && data.error || data).slice(0, 500));
+      console.error('  model:', MODEL, '| system chars:', String(system).length, '| messages:', msgs.length);
+
       // AI fail hui to credit wapas - customer ka paisa nahi katna chahiye
       if (charged) {
         try {
@@ -620,7 +631,7 @@ app.post('/api/admin/user-logs', async (req, res) => {
 
 app.listen(PORT, () => {
   console.log('AuraVeda Server running on port ' + PORT);
-  console.log('Claude AI:       ' + (process.env.ANTHROPIC_API_KEY ? 'OK' : 'MISSING'));
+  console.log('Claude AI:       ' + (process.env.ANTHROPIC_API_KEY ? 'OK' : 'MISSING') + '  | model: ' + MODEL);
   console.log('Supabase:        ' + (SB_URL && SB_KEY              ? 'OK' : 'MISSING - app kaam nahi karega'));
   console.log('Razorpay Secret: ' + (process.env.RAZORPAY_SECRET   ? 'OK' : 'MISSING - payments wont verify'));
   console.log('Stripe Secret:   ' + (process.env.STRIPE_SECRET_KEY ? 'OK' : 'MISSING - international payments off'));
